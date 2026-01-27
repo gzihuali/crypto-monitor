@@ -34,10 +34,10 @@ def send_alert(symbol, price, chg, vol):
 
 def check_signals():
     global alerted
-    alerted.clear()
+    alerted.clear()  # 每15分钟周期清空，确保周期内只发一次
 
-    logging.info("开始新一轮检查 (5m 周期)")
-    print("开始新一轮检查 (5m 周期)")
+    logging.info("开始新一轮检查 (1h 周期)")
+    print("开始新一轮检查 (1h 周期)")
 
     try:
         ex = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
@@ -47,14 +47,14 @@ def check_signals():
 
         perps = [s for s in markets if markets[s].get('swap') and markets[s]['quote'] == 'USDT']
         tickers = ex.fetch_tickers(perps)
-        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)][:200]
+        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]  # 全部币种
 
         logging.info(f"加载 {len(symbols)} 个合约")
         print(f"加载 {len(symbols)} 个合约")
 
         for sym in symbols:
             try:
-                ohlcv = ex.fetch_ohlcv(sym, '5m', limit=3000)
+                ohlcv = ex.fetch_ohlcv(sym, '1h', limit=3000)
                 df = pd.DataFrame(ohlcv, columns=['ts','o','h','l','c','v'])
 
                 late10 = None
@@ -86,12 +86,12 @@ def check_signals():
         print(f"加载市场/合约失败: {e}")
 
 if __name__ == "__main__":
-    logging.info("监控启动 - Railway免费层 - 5分钟周期")
-    print("监控启动 - Railway免费层 - 5分钟周期")
+    logging.info("监控启动 - Railway免费层 - 1小时周期，每15分钟检查一次")
+    print("监控启动 - Railway免费层 - 1小时周期，每15分钟检查一次")
     while True:
         try:
             check_signals()
         except Exception as e:
             logging.error(f"主循环异常: {e}")
             print(f"主循环异常: {e}")
-        time.sleep(300)
+        time.sleep(900)  # 每15分钟检查一次（900秒）
