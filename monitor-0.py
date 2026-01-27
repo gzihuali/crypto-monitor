@@ -37,7 +37,7 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 交易量延迟增长 大于 10 (1000%) 警报 {period_display}
 
 时间: {timestamp}
-币种: **{symbol}**   # 加粗突出币种
+币种: **{symbol}**
 最新价: {price}
 24h涨跌: {chg}
 24h量(USDT): {vol}
