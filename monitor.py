@@ -8,7 +8,7 @@ from datetime import datetime
 logging.basicConfig(filename='monitor.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-TELEGRAM_TOKEN = "8593268164:AAGUYOqIvTBUkOWrBhOyTjK5dluppIqFziQ"
+TELEGRAM_TOKEN = "8536228993:AAEXwG-kl9kFpSEBZqazv7oE0gUDhYeLulA"
 TELEGRAM_CHAT_ID = "2043458735"
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1464886198886469740/o5eSzKpez2IraxE7kWOsEm-xINvVM9kLzItbuLtAe0XkdWk4WM9KD4sgo_j6WAiJ8kfp"
 
@@ -140,3 +140,4 @@ if __name__ == "__main__":
             logging.error(f"主循环异常: {e}")
             print(f"主循环异常: {e}")
         time.sleep(300)  # 每5分钟检查一次
+
