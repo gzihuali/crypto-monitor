@@ -32,18 +32,20 @@ def send_alert(symbol, price, chg, vol, period='1h'):
     timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     period_display = f"({period}周期)"
 
+    # Telegram MarkdownV2 版本（粗体 + 兼容性最好）
     telegram_msg = f"""
-<b>🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}</b>
+*🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}*
 
-<b>时间：</b> {timestamp}  
-<b>币种：</b> <span style="color:#FF4444; font-weight:bold;">{symbol}</span>  
-<b>最新价：</b> {price}  
-<b>24h涨跌：</b> {chg}  
-<b>24h量(USDT)：</b> {vol}
+时间: {timestamp}  
+币种: *{symbol}*  
+最新价: {price}  
+24h涨跌: {chg}  
+24h量(USDT): {vol}
 
 ---
 """.strip()
 
+    # Discord Markdown 版本
     discord_msg = f"""
 **🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}**
 
@@ -64,7 +66,7 @@ def send_alert(symbol, price, chg, vol, period='1h'):
                                 params={
                                     "chat_id": TELEGRAM_CHAT_ID,
                                     "text": telegram_msg,
-                                    "parse_mode": "HTML"
+                                    "parse_mode": "MarkdownV2"
                                 },
                                 timeout=15)
         print(f"Telegram 状态码: {response.status_code}")
@@ -116,7 +118,7 @@ def check_signals():
         print("开始 fetch_tickers...")
         perps = [s for s in markets if markets[s].get('swap') and markets[s].get('active') and markets[s]['quote'] == 'USDT']
         tickers = ex.fetch_tickers(perps)
-        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)][:200]  # 临时前200，恢复速度
+        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]  # 全部正常永续合约
 
         total = len(symbols)
         logging.info(f"加载 {total} 个正常永续合约")
@@ -150,8 +152,7 @@ def check_signals():
             except Exception as e:
                 logging.error(f"{sym} 出错: {e}")
 
-            time.sleep(0.2)  # 延时0.2秒，避免429
-
+            # 进度显示（每10个或最后一批强制显示）
             if processed % 10 == 0 or processed == total:
                 elapsed = time.time() - start_time
                 percent = (processed / total) * 100
@@ -174,4 +175,4 @@ if __name__ == "__main__":
             check_signals()
         except Exception as e:
             logging.error(f"主循环异常: {e}")
-        time.sleep(300)
+        time.sleep(300)  # 每5分钟检查一次
