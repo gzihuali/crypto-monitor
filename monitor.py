@@ -56,18 +56,46 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 ---
 """
 
-    try:
-        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                     params={"chat_id": TELEGRAM_CHAT_ID, "text": telegram_msg, "parse_mode": "HTML"})
-        logging.info(f"Telegram sent: {symbol} ({period}) at {timestamp}")
-    except Exception as e:
-        logging.error(f"Telegram failed: {e}")
+    print(f"准备发送 Telegram: {symbol} at {timestamp}")
+    logging.info(f"准备发送 Telegram: {symbol} at {timestamp}")
 
     try:
-        requests.post(DISCORD_WEBHOOK, json={"content": discord_msg})
-        logging.info(f"Discord sent: {symbol} ({period}) at {timestamp}")
+        response = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                params={
+                                    "chat_id": TELEGRAM_CHAT_ID,
+                                    "text": telegram_msg,
+                                    "parse_mode": "HTML"
+                                },
+                                timeout=15)
+        print(f"Telegram 状态码: {response.status_code}")
+        print(f"Telegram 返回: {response.text}")
+        logging.info(f"Telegram 状态码: {response.status_code} | 返回: {response.text[:300]}...")
+        if response.status_code == 200:
+            print(f"Telegram 发送成功: {symbol}")
+            logging.info(f"Telegram 发送成功: {symbol} at {timestamp}")
+        else:
+            print(f"Telegram 非200响应: {response.text}")
+            logging.warning(f"Telegram 非200: {response.text}")
     except Exception as e:
-        logging.error(f"Discord failed: {e}")
+        print(f"Telegram 请求异常: {e}")
+        logging.error(f"Telegram 请求异常: {e}")
+
+    print(f"准备发送 Discord: {symbol} at {timestamp}")
+    logging.info(f"准备发送 Discord: {symbol} at {timestamp}")
+
+    try:
+        response = requests.post(DISCORD_WEBHOOK, json={"content": discord_msg}, timeout=15)
+        print(f"Discord 状态码: {response.status_code}")
+        logging.info(f"Discord 状态码: {response.status_code}")
+        if response.status_code == 204:
+            print(f"Discord 发送成功: {symbol}")
+            logging.info(f"Discord 发送成功: {symbol} at {timestamp}")
+    except Exception as e:
+        print(f"Discord 请求异常: {e}")
+        logging.error(f"Discord 请求异常: {e}")
+
+    print(f"[警报已尝试发送] {symbol} - 交易量延迟增长>10 距 = 0 ({period})")
+    logging.info(f"[警报已尝试发送] {symbol} ({period})")
 
 def check_signals():
     global alerted
@@ -78,13 +106,17 @@ def check_signals():
     print("开始新一轮检查 (1h 周期)")
 
     try:
+        logging.info("开始 load_markets...")
+        print("开始 load_markets...")
         ex = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
         markets = ex.load_markets()
         logging.info("load_markets 成功")
 
+        logging.info("开始 fetch_tickers...")
+        print("开始 fetch_tickers...")
         perps = [s for s in markets if markets[s].get('swap') and markets[s].get('active') and markets[s]['quote'] == 'USDT']
         tickers = ex.fetch_tickers(perps)
-        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]
+        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)][:200]  # 临时前200，恢复速度
 
         total = len(symbols)
         logging.info(f"加载 {total} 个正常永续合约")
@@ -109,7 +141,7 @@ def check_signals():
                             vol = f"{t.get('quoteVolume', 0):,.0f}"
                             send_alert(sym.replace('/USDT:USDT', ''), price, chg, vol, period='1h')
                             alerted.add(sym)
-                            logging.info(f"找到信号并发送: {sym}")
+                            logging.info(f"找到信号并发送: {sym} (增长率 > 1000%)")
 
             except ccxt.RateLimitExceeded as e:
                 logging.warning(f"Rate limit exceeded for {sym}, waiting 10s")
@@ -118,7 +150,8 @@ def check_signals():
             except Exception as e:
                 logging.error(f"{sym} 出错: {e}")
 
-            # 进度显示（每10个记录一次，最后一批强制显示100% + 总耗时）
+            time.sleep(0.2)  # 延时0.2秒，避免429
+
             if processed % 10 == 0 or processed == total:
                 elapsed = time.time() - start_time
                 percent = (processed / total) * 100
@@ -127,11 +160,11 @@ def check_signals():
 
     except Exception as e:
         logging.error(f"加载市场/合约失败: {e}")
+        print(f"加载市场/合约失败: {e}")
 
 if __name__ == "__main__":
     logging.info("监控启动 - Railway免费层 - 1小时周期，每5分钟检查一次")
 
-    # 启动 Flask 保活服务器（后台线程）
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
@@ -141,4 +174,4 @@ if __name__ == "__main__":
             check_signals()
         except Exception as e:
             logging.error(f"主循环异常: {e}")
-        time.sleep(300)  # 每5分钟检查一次
+        time.sleep(300)
