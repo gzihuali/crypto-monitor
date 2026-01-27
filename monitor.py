@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from flask import Flask
 from threading import Thread
+import re  # 新增：用于转义特殊字符
 
 app = Flask(__name__)
 
@@ -25,27 +26,31 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1464886198886469740/o5eSzKpe
 
 alerted = set()
 
-# 东八区时区（北京时间）
 BEIJING_TZ = timezone(timedelta(hours=8))
+
+def escape_markdown_v2(text):
+    """MarkdownV2 转义特殊字符"""
+    chars_to_escape = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(chars_to_escape)}])', r'\\\1', text)
 
 def send_alert(symbol, price, chg, vol, period='1h'):
     timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    period_display = f"({period}周期)"
+    period_display = f"({escape_markdown_v2(period)}周期)"
 
-    # Telegram MarkdownV2 版本（粗体 + 兼容性最好）
+    # Telegram MarkdownV2 版本（转义所有特殊字符）
     telegram_msg = f"""
-*🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}*
+*🚨 交易量延迟增长 \\>10 \\(1000\\%\\) 警报 {period_display}*
 
-时间: {timestamp}  
-币种: *{symbol}*  
-最新价: {price}  
-24h涨跌: {chg}  
-24h量(USDT): {vol}
+时间: {escape_markdown_v2(timestamp)}  
+币种: *{escape_markdown_v2(symbol)}*  
+最新价: {escape_markdown_v2(price)}  
+24h涨跌: {escape_markdown_v2(chg)}  
+24h量\\(USDT\\): {escape_markdown_v2(vol)}
 
 ---
 """.strip()
 
-    # Discord Markdown 版本
+    # Discord Markdown 版本（不需要转义 > 等字符）
     discord_msg = f"""
 **🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}**
 
@@ -152,7 +157,8 @@ def check_signals():
             except Exception as e:
                 logging.error(f"{sym} 出错: {e}")
 
-            # 进度显示（每10个或最后一批强制显示）
+            time.sleep(0.2)  # 延时0.2秒，避免429
+
             if processed % 10 == 0 or processed == total:
                 elapsed = time.time() - start_time
                 percent = (processed / total) * 100
@@ -175,4 +181,4 @@ if __name__ == "__main__":
             check_signals()
         except Exception as e:
             logging.error(f"主循环异常: {e}")
-        time.sleep(300)  # 每5分钟检查一次
+        time.sleep(300)
