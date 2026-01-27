@@ -3,7 +3,6 @@ import ccxt
 import pandas as pd
 import requests
 import logging
-import re  # 用于转义 MarkdownV2 特殊字符
 from datetime import datetime, timezone, timedelta
 from flask import Flask
 from threading import Thread
@@ -29,31 +28,26 @@ alerted = set()
 # 东八区时区（北京时间）
 BEIJING_TZ = timezone(timedelta(hours=8))
 
-def escape_markdown_v2(text):
-    """MarkdownV2 转义特殊字符"""
-    chars_to_escape = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(chars_to_escape)}])', r'\\\1', str(text))
-
 def send_alert(symbol, price, chg, vol, period='1h'):
     timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    period_display = f"({escape_markdown_v2(period)}周期)"
+    period_display = f"({period}周期)"
 
-    # Telegram MarkdownV2 版本（所有特殊字符转义）
+    # Telegram 纯文本版本（无 parse_mode，避免转义问题）
     telegram_msg = f"""
-*🚨 交易量延迟增长 \\>10 \\(1000\\%\\) 警报 {period_display}*
+交易量延迟增长 大于 10 (1000%) 警报 {period_display}
 
-时间: {escape_markdown_v2(timestamp)}  
-币种: *{escape_markdown_v2(symbol)}*  
-最新价: {escape_markdown_v2(price)}  
-24h涨跌: {escape_markdown_v2(chg)}  
-24h量\\(USDT\\): {escape_markdown_v2(vol)}
+时间: {timestamp}
+币种: **{symbol}**   # 加粗突出币种
+最新价: {price}
+24h涨跌: {chg}
+24h量(USDT): {vol}
 
 ---
 """.strip()
 
-    # Discord Markdown 版本（无需额外转义）
+    # Discord Markdown 版本（保持原样，已正常工作）
     discord_msg = f"""
-**🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}**
+**交易量延迟增长 >10 (1000%) 警报 {period_display}**
 
 **时间：** {timestamp}  
 **币种：** **{symbol}**  
@@ -71,8 +65,8 @@ def send_alert(symbol, price, chg, vol, period='1h'):
         response = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                                 params={
                                     "chat_id": TELEGRAM_CHAT_ID,
-                                    "text": telegram_msg,
-                                    "parse_mode": "MarkdownV2"
+                                    "text": telegram_msg
+                                    # 故意不加 parse_mode，避免任何转义问题
                                 },
                                 timeout=15)
         print(f"Telegram 状态码: {response.status_code}")
