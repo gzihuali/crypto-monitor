@@ -3,10 +3,10 @@ import ccxt
 import pandas as pd
 import requests
 import logging
+import re  # 用于转义 MarkdownV2 特殊字符
 from datetime import datetime, timezone, timedelta
 from flask import Flask
 from threading import Thread
-import re  # 新增：用于转义特殊字符
 
 app = Flask(__name__)
 
@@ -26,18 +26,19 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1464886198886469740/o5eSzKpe
 
 alerted = set()
 
+# 东八区时区（北京时间）
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 def escape_markdown_v2(text):
     """MarkdownV2 转义特殊字符"""
     chars_to_escape = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(chars_to_escape)}])', r'\\\1', text)
+    return re.sub(f'([{re.escape(chars_to_escape)}])', r'\\\1', str(text))
 
 def send_alert(symbol, price, chg, vol, period='1h'):
     timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     period_display = f"({escape_markdown_v2(period)}周期)"
 
-    # Telegram MarkdownV2 版本（转义所有特殊字符）
+    # Telegram MarkdownV2 版本（所有特殊字符转义）
     telegram_msg = f"""
 *🚨 交易量延迟增长 \\>10 \\(1000\\%\\) 警报 {period_display}*
 
@@ -50,7 +51,7 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 ---
 """.strip()
 
-    # Discord Markdown 版本（不需要转义 > 等字符）
+    # Discord Markdown 版本（无需额外转义）
     discord_msg = f"""
 **🚨 交易量延迟增长 >10 (1000%) 警报 {period_display}**
 
@@ -181,4 +182,4 @@ if __name__ == "__main__":
             check_signals()
         except Exception as e:
             logging.error(f"主循环异常: {e}")
-        time.sleep(300)
+        time.sleep(300)  # 每5分钟检查一次
