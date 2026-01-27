@@ -14,7 +14,7 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1464886198886469740/o5eSzKpe
 alerted = set()
 
 def send_alert(symbol, price, chg, vol):
-    message = f"[警报] 交易量延迟增长 >10 距 = 0\n币种: {symbol}\n最新价: {price}\n24h涨跌: {chg}\n24h量(USDT): {vol}"
+    message = f"[警报] 交易量延迟增长 >10 (1000%) - 最近6根K线\n币种: {symbol}\n最新价: {price}\n24h涨跌: {chg}\n24h量(USDT): {vol}"
     try:
         requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                      params={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"})
@@ -47,39 +47,43 @@ def check_signals():
 
         perps = [s for s in markets if markets[s].get('swap') and markets[s]['quote'] == 'USDT']
         tickers = ex.fetch_tickers(perps)
-        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]  # 全部币种
+        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]  # 全部币种，按交易量降序
 
         logging.info(f"加载 {len(symbols)} 个合约")
         print(f"加载 {len(symbols)} 个合约")
 
         for sym in symbols:
             try:
-                ohlcv = ex.fetch_ohlcv(sym, '1h', limit=3000)
+                # 只获取最近10根1h K线（足够计算最近6根）
+                ohlcv = ex.fetch_ohlcv(sym, '1h', limit=10)
                 df = pd.DataFrame(ohlcv, columns=['ts','o','h','l','c','v'])
 
-                late10 = None
                 if len(df) >= 6:
-                    for j in range(len(df)-1, 5-1, -1):
-                        v = df['v'].iloc[j-5:j+1]
-                        if v.iloc[:3].sum() > 0:
-                            r = v.iloc[-3:].sum() / v.iloc[:3].sum() - 1
-                            if late10 is None and r > 10:
-                                late10 = len(df)-1-j
-                            if late10 is not None: break
+                    # 最近3根总交易量 (index -1, -2, -3)
+                    recent_3 = df['v'].iloc[-3:].sum()
+                    # 前3根总交易量 (index -4, -5, -6)
+                    prev_3 = df['v'].iloc[-6:-3].sum()
 
-                if late10 == 0 and sym not in alerted:
-                    t = tickers.get(sym, {})
-                    price = t.get('last', 'N/A')
-                    chg = f"{t.get('percentage', 'N/A'):+.2f}%"
-                    vol = f"{t.get('quoteVolume', 0):,.0f}"
-                    send_alert(sym.replace('/USDT:USDT', ''), price, chg, vol)
-                    alerted.add(sym)
-                    logging.info(f"找到信号并发送: {sym} (late10=0)")
-                    print(f"找到信号并发送: {sym} (late10=0)")
+                    if prev_3 > 0 and (recent_3 / prev_3 - 1) > 10:
+                        if sym not in alerted:
+                            t = tickers.get(sym, {})
+                            price = t.get('last', 'N/A')
+                            chg = f"{t.get('percentage', 'N/A'):+.2f}%"
+                            vol = f"{t.get('quoteVolume', 0):,.0f}"
+                            send_alert(sym.replace('/USDT:USDT', ''), price, chg, vol)
+                            alerted.add(sym)
+                            logging.info(f"找到信号并发送: {sym} (增长率 > 1000%)")
+                            print(f"找到信号并发送: {sym} (增长率 > 1000%)")
 
+            except ccxt.RateLimitExceeded as e:
+                logging.warning(f"Rate limit exceeded for {sym}, waiting 10s")
+                time.sleep(10)
+                continue
             except Exception as e:
                 logging.error(f"{sym} 出错: {e}")
                 print(f"{sym} 出错: {e}")
+
+            time.sleep(0.5)  # 每合约延时0.5秒，避免429
 
     except Exception as e:
         logging.error(f"加载市场/合约失败: {e}")
@@ -94,4 +98,4 @@ if __name__ == "__main__":
         except Exception as e:
             logging.error(f"主循环异常: {e}")
             print(f"主循环异常: {e}")
-        time.sleep(900)  # 每15分钟检查一次（900秒）
+        time.sleep(900)  # 每15分钟检查一次
