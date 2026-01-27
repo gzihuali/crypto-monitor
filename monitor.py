@@ -5,13 +5,14 @@ import requests
 import logging
 from datetime import datetime, timezone, timedelta
 from flask import Flask
-from threading import Thread
+from threading import Thread, Event
+import threading
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Crypto Monitor is running! (1h cycle, check every 5 min)"
+    return "Crypto Monitor is running! (1h cycle, check at :00, :05, :10...)"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
@@ -24,20 +25,21 @@ TELEGRAM_CHAT_ID = "2043458735"
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1464886198886469740/o5eSzKpez2IraxE7kWOsEm-xINvVM9kLzItbuLtAe0XkdWk4WM9KD4sgo_j6WAiJ8kfp"
 
 alerted = set()
+last_alert_hour = -1  # 上次发送警报的小时（东八区）
 
-# 东八区时区（北京时间）
 BEIJING_TZ = timezone(timedelta(hours=8))
+
+stop_event = Event()  # 用于中断正在运行的检查
 
 def send_alert(symbol, price, chg, vol, period='1h'):
     timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     period_display = f"({period}周期)"
 
-    # Telegram 纯文本版本（无 parse_mode，避免转义问题）
     telegram_msg = f"""
 交易量延迟增长 大于 10 (1000%) 警报 {period_display}
 
 时间: {timestamp}
-币种: **{symbol}**   # 加粗突出币种
+币种: *{symbol}*
 最新价: {price}
 24h涨跌: {chg}
 24h量(USDT): {vol}
@@ -45,7 +47,6 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 ---
 """.strip()
 
-    # Discord Markdown 版本（保持原样，已正常工作）
     discord_msg = f"""
 **交易量延迟增长 >10 (1000%) 警报 {period_display}**
 
@@ -58,74 +59,60 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 ---
 """
 
-    print(f"准备发送 Telegram: {symbol} at {timestamp}")
-    logging.info(f"准备发送 Telegram: {symbol} at {timestamp}")
-
     try:
         response = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                                params={
-                                    "chat_id": TELEGRAM_CHAT_ID,
-                                    "text": telegram_msg
-                                    # 故意不加 parse_mode，避免任何转义问题
-                                },
+                                params={"chat_id": TELEGRAM_CHAT_ID, "text": telegram_msg},
                                 timeout=15)
-        print(f"Telegram 状态码: {response.status_code}")
-        print(f"Telegram 返回: {response.text}")
-        logging.info(f"Telegram 状态码: {response.status_code} | 返回: {response.text[:300]}...")
+        logging.info(f"Telegram 状态码: {response.status_code}")
         if response.status_code == 200:
-            print(f"Telegram 发送成功: {symbol}")
             logging.info(f"Telegram 发送成功: {symbol} at {timestamp}")
-        else:
-            print(f"Telegram 非200响应: {response.text}")
-            logging.warning(f"Telegram 非200: {response.text}")
     except Exception as e:
-        print(f"Telegram 请求异常: {e}")
         logging.error(f"Telegram 请求异常: {e}")
-
-    print(f"准备发送 Discord: {symbol} at {timestamp}")
-    logging.info(f"准备发送 Discord: {symbol} at {timestamp}")
 
     try:
         response = requests.post(DISCORD_WEBHOOK, json={"content": discord_msg}, timeout=15)
-        print(f"Discord 状态码: {response.status_code}")
         logging.info(f"Discord 状态码: {response.status_code}")
         if response.status_code == 204:
-            print(f"Discord 发送成功: {symbol}")
             logging.info(f"Discord 发送成功: {symbol} at {timestamp}")
     except Exception as e:
-        print(f"Discord 请求异常: {e}")
         logging.error(f"Discord 请求异常: {e}")
 
-    print(f"[警报已尝试发送] {symbol} - 交易量延迟增长>10 距 = 0 ({period})")
-    logging.info(f"[警报已尝试发送] {symbol} ({period})")
+    logging.info(f"[警报已尝试发送] {symbol} - 交易量延迟增长大于10 距 = 0 ({period})")
 
 def check_signals():
-    global alerted
-    alerted.clear()
+    global alerted, last_alert_hour
+
+    stop_event.clear()  # 重置中断标志
+
+    current_time = datetime.now(BEIJING_TZ)
+    current_hour = current_time.hour
+
+    # 如果进入新小时周期，重置警报
+    if current_hour != last_alert_hour:
+        alerted.clear()
+        last_alert_hour = current_hour
+        logging.info(f"新小时周期开始: {current_hour:02d}:00，重置警报状态")
 
     start_time = time.time()
-    logging.info("开始新一轮检查 (1h 周期)")
-    print("开始新一轮检查 (1h 周期)")
+    logging.info(f"开始新一轮检查 (1h 周期) - {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"开始新一轮检查 (1h 周期) - {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
-        logging.info("开始 load_markets...")
-        print("开始 load_markets...")
         ex = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
         markets = ex.load_markets()
-        logging.info("load_markets 成功")
-
-        logging.info("开始 fetch_tickers...")
-        print("开始 fetch_tickers...")
         perps = [s for s in markets if markets[s].get('swap') and markets[s].get('active') and markets[s]['quote'] == 'USDT']
         tickers = ex.fetch_tickers(perps)
-        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]  # 全部正常永续合约
+        symbols = [s for s, v in sorted(((s, tickers.get(s, {}).get('quoteVolume', 0)) for s in perps), key=lambda x:x[1], reverse=True)]
 
         total = len(symbols)
         logging.info(f"加载 {total} 个正常永续合约")
-        print(f"加载 {total} 个正常永续合约")
 
         processed = 0
         for sym in symbols:
+            if stop_event.is_set():
+                logging.info(f"检查被中断（进入下一个时间点） - 已处理 {processed}/{total}")
+                return
+
             processed += 1
             try:
                 ohlcv = ex.fetch_ohlcv(sym, '1h', limit=10)
@@ -152,8 +139,6 @@ def check_signals():
             except Exception as e:
                 logging.error(f"{sym} 出错: {e}")
 
-            time.sleep(0.2)  # 延时0.2秒，避免429
-
             if processed % 10 == 0 or processed == total:
                 elapsed = time.time() - start_time
                 percent = (processed / total) * 100
@@ -162,18 +147,39 @@ def check_signals():
 
     except Exception as e:
         logging.error(f"加载市场/合约失败: {e}")
-        print(f"加载市场/合约失败: {e}")
+
+def scheduler():
+    while True:
+        now = datetime.now(BEIJING_TZ)
+        minute = now.minute
+
+        # 只在 00,05,10,...,55 分运行
+        if minute % 5 == 0:
+            # 启动新检查前，先设置中断标志，让上一个检查（如果还在跑）退出
+            stop_event.set()
+            time.sleep(1)  # 给上一个线程一点时间退出
+
+            # 清空中断标志，开始新检查
+            stop_event.clear()
+            check_thread = Thread(target=check_signals)
+            check_thread.daemon = True
+            check_thread.start()
+
+        # 每分钟检查一次是否到达整点
+        time.sleep(60 - now.second)
 
 if __name__ == "__main__":
-    logging.info("监控启动 - Railway免费层 - 1小时周期，每5分钟检查一次")
+    logging.info("监控启动 - Railway免费层 - 1小时周期，每5分钟准点检查一次")
 
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
+    # 启动定时调度器
+    scheduler_thread = Thread(target=scheduler)
+    scheduler_thread.daemon = True
+    scheduler_thread.start()
+
+    # 主线程保持运行
     while True:
-        try:
-            check_signals()
-        except Exception as e:
-            logging.error(f"主循环异常: {e}")
-        time.sleep(300)  # 每5分钟检查一次
+        time.sleep(60)
