@@ -37,24 +37,22 @@ def send_alert(symbol, price, chg, vol, period='1h'):
 
     telegram_msg = f"""
 交易量延迟增长率 大于 10 (1000%) 警报 {period_display}
-
-币种: **{symbol}**
-24小时涨跌幅: **{chg}**
-24小时交易量(USDT): **{vol}**
-最新价: {price}
+币种:  *{symbol}*
+24小时涨跌幅:  {chg}
+24小时交易量(USDT):  {vol}
+最新价:  {price}
 时间: {timestamp}
 
 ————————————————————————————————
-""".strip()
+"""#.strip()
 
     discord_msg = f"""
 **交易量延迟增长率 >10 (1000%) 警报 {period_display}**
-
 **币种：** **{symbol}**  
-**24小时涨跌幅：** **{chg}**  
-**24小时交易量(USDT)：** **{vol}**
-**最新价：** {price}  
-**时间：** {timestamp}  
+24小时涨跌幅： **{chg}**  
+24小时交易量(USDT)： **{vol}**
+最新价： {price}  
+时间： {timestamp}  
 
 ————————————————————————————————
 """
@@ -183,4 +181,5 @@ if __name__ == "__main__":
     # 主线程保持运行
     while True:
         time.sleep(60)
+
 
